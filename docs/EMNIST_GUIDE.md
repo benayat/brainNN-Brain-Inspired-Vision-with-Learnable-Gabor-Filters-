@@ -49,6 +49,11 @@ Tests all splits/models/configurations:
 
 # Filters mode: Test filter scaling (~1 hour)
 ./scripts/test_emnist_comprehensive.sh 30 filters
+
+# Dry-run: Print commands without executing (verify before running)
+./scripts/test_emnist_comprehensive.sh 30 quick dry-run
+./scripts/test_emnist_comprehensive.sh 30 full dry-run
+./scripts/test_emnist_comprehensive.sh 30 dry-run  # defaults to quick mode
 ```
 
 ## EMNIST Splits Explained
