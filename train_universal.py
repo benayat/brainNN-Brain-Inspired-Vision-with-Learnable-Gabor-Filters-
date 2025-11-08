@@ -16,9 +16,13 @@ def parse_args():
     p = argparse.ArgumentParser()
     # dataset
     p.add_argument("--dataset", type=str, default="mnist", 
-                   choices=["mnist", "fashion", "fashion_mnist", "cifar10", "svhn"])
-    # image sizes: mnist, fashion-28, cifar10-32
-    p.add_argument("--image-size", type=int, default=64)
+                   choices=["mnist", "fashion", "fashion_mnist", "cifar10", "svhn", 
+                           "emnist_letters", "emnist_digits", "emnist_balanced", "emnist_byclass", "emnist_bymerge"])
+    p.add_argument("--emnist-split", type=str, default="balanced",
+                   help="EMNIST split to use (only when dataset starts with 'emnist_')")
+    # image sizes: mnist, fashion, emnist: 28, cifar10/svhn: 32
+    p.add_argument("--image-size", type=int, default=None,
+                   help="Image size (default: auto-detect based on dataset)")
     p.add_argument("--batch-size", type=int, default=512)
     
     # model
@@ -86,9 +90,18 @@ def make_dataloaders(dataset_name: str, image_size: int, batch_size: int):
     if dataset_name == "fashion":
         dataset_name = "fashion_mnist"
     
+    # Auto-detect image size if not specified
+    if image_size is None:
+        if dataset_name in ["mnist", "fashion_mnist"] or dataset_name.startswith("emnist"):
+            image_size = 28  # Native resolution for grayscale datasets
+        elif dataset_name in ["cifar10", "svhn"]:
+            image_size = 32  # Native resolution for RGB datasets
+        else:
+            image_size = 32  # Default fallback
+    
     if dataset_name == "mnist":
+        # MNIST: 28×28 grayscale, use native resolution (no resize)
         tfm = transforms.Compose([
-            transforms.Resize(image_size, antialias=True),
             transforms.ToTensor(),
         ])
         train_set = datasets.MNIST(root="data", train=True, download=True, transform=tfm)
@@ -97,8 +110,8 @@ def make_dataloaders(dataset_name: str, image_size: int, batch_size: int):
         num_classes = 10
         
     elif dataset_name == "fashion_mnist":
+        # Fashion-MNIST: 28×28 grayscale, use native resolution (no resize)
         tfm = transforms.Compose([
-            transforms.Resize(image_size, antialias=True),
             transforms.ToTensor(),
         ])
         train_set = datasets.FashionMNIST(root="data", train=True, download=True, transform=tfm)
@@ -110,14 +123,12 @@ def make_dataloaders(dataset_name: str, image_size: int, batch_size: int):
         # CIFAR-10: RGB color images (32x32), 10 classes
         # Expected accuracy: CNNs ~75-80%, competitive architecture needed
         tfm_train = transforms.Compose([
-            transforms.Resize(image_size, antialias=True),
             transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(image_size, padding=4),
+            transforms.RandomCrop(32, padding=4),
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
         tfm_test = transforms.Compose([
-            transforms.Resize(image_size, antialias=True),
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
@@ -130,12 +141,10 @@ def make_dataloaders(dataset_name: str, image_size: int, batch_size: int):
         # SVHN: Street View House Numbers (32x32 RGB), 10 classes (digits)
         # Expected accuracy: ~90-95% (harder than MNIST, easier than CIFAR-10)
         tfm_train = transforms.Compose([
-            transforms.Resize(image_size, antialias=True),
             transforms.ToTensor(),
             transforms.Normalize((0.4377, 0.4438, 0.4728), (0.1980, 0.2010, 0.1970)),
         ])
         tfm_test = transforms.Compose([
-            transforms.Resize(image_size, antialias=True),
             transforms.ToTensor(),
             transforms.Normalize((0.4377, 0.4438, 0.4728), (0.1980, 0.2010, 0.1970)),
         ])
@@ -144,17 +153,68 @@ def make_dataloaders(dataset_name: str, image_size: int, batch_size: int):
         in_channels = 3
         num_classes = 10
         
+    elif dataset_name.startswith("emnist"):
+        # EMNIST: Extended MNIST with letters and more
+        # Splits: balanced (131K, 47 classes), byclass (814K, 62 classes), 
+        #         bymerge (814K, 47 classes), letters (145K, 26 classes), digits (280K, 10 classes)
+        split_name = dataset_name.replace("emnist_", "")
+        
+        # EMNIST class counts per split
+        class_mapping = {
+            "balanced": 47,   # Balanced across classes
+            "byclass": 62,    # All 62 classes (digits + uppercase + lowercase)
+            "bymerge": 47,    # Merged confusing classes
+            "letters": 26,    # Only letters (A-Z)
+            "digits": 10,     # Only digits (0-9)
+            "mnist": 10,      # MNIST-compatible
+        }
+        
+        num_classes = class_mapping.get(split_name, 47)
+        
+        # EMNIST: 28×28 grayscale, use native resolution (no resize)
+        tfm = transforms.Compose([
+            transforms.ToTensor(),
+        ])
+        
+        # Load base EMNIST dataset
+        train_set_base = datasets.EMNIST(root="data", split=split_name, train=True, download=True, transform=tfm)
+        test_set_base = datasets.EMNIST(root="data", split=split_name, train=False, download=True, transform=tfm)
+        
+        # Wrap datasets to remap labels to 0-indexed
+        # EMNIST labels can be 1-indexed or have gaps, need to remap to [0, num_classes-1]
+        from torch.utils.data import Dataset
+        
+        class RemapLabelsDataset(Dataset):
+            """Wrapper to remap EMNIST labels to contiguous 0-indexed range."""
+            def __init__(self, base_dataset):
+                self.base_dataset = base_dataset
+                # Get all unique labels and create mapping
+                all_labels = set()
+                for _, label in base_dataset:
+                    all_labels.add(label)
+                sorted_labels = sorted(all_labels)
+                self.label_map = {old: new for new, old in enumerate(sorted_labels)}
+                
+            def __len__(self):
+                return len(self.base_dataset)
+            
+            def __getitem__(self, idx):
+                img, label = self.base_dataset[idx]
+                return img, self.label_map[label]
+        
+        train_set = RemapLabelsDataset(train_set_base)
+        test_set = RemapLabelsDataset(test_set_base)
+        in_channels = 1
+        
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
     
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, 
                               num_workers=4, pin_memory=True)
-    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False,
+    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, 
                              num_workers=4, pin_memory=True)
     
-    return train_loader, test_loader, in_channels, num_classes
-
-
+    return train_loader, test_loader, in_channels, num_classes, image_size
 def create_model(model_name: str, in_channels: int, num_classes: int, args):
     """Create model based on name and args."""
     
@@ -318,8 +378,8 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Data
-    train_loader, test_loader, in_channels, num_classes = make_dataloaders(
+    # Data loaders
+    train_loader, test_loader, in_channels, num_classes, actual_image_size = make_dataloaders(
         args.dataset, args.image_size, args.batch_size
     )
 
@@ -335,7 +395,7 @@ def main():
     # Info header
     print(f"[info] Model: {args.model} | Dataset: {args.dataset}")
     print(f"[info] Device: {device.type} | Params: {total_params:,}")
-    print(f"[info] Image size: {args.image_size} | Batch size: {args.batch_size}")
+    print(f"[info] Image size: {actual_image_size} | Batch size: {args.batch_size}")
     
     # Epoch 0 eval
     acc0, ce0 = evaluate(model, test_loader, device)

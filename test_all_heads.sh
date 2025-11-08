@@ -17,18 +17,18 @@ DATASET=${1:-fashion}     # Default to Fashion-MNIST (faster than CIFAR-10)
 EPOCHS=${2:-20}           # Default 20 epochs
 TEST_MODE=${3:-all}       # all | v4 | filters
 
-# Set image size based on dataset
+# Set image size based on dataset (use native resolution)
 case $DATASET in
-    mnist|fashion|fashion_mnist)
-        IMAGE_SIZE=64  # Upscale from 28×28 to 64×64
+    mnist|fashion|fashion_mnist|emnist*)
+        IMAGE_SIZE=28  # Native 28×28 resolution
         NATIVE_SIZE=28
         ;;
     cifar10|svhn)
-        IMAGE_SIZE=32  # Native 32×32
+        IMAGE_SIZE=32  # Native 32×32 resolution
         NATIVE_SIZE=32
         ;;
     *)
-        IMAGE_SIZE=64  # Default
+        IMAGE_SIZE=32  # Default
         NATIVE_SIZE=32
         ;;
 esac
@@ -62,7 +62,6 @@ run_test() {
     uv run train_universal.py \
         --model "$model" \
         --dataset "$DATASET" \
-        --image-size "$IMAGE_SIZE" \
         --epochs "$EPOCHS" \
         --learnable-freq-range \
         --grouped-freq-bands \
