@@ -120,6 +120,8 @@ Use `--dataset {mnist,fashion,svhn,cifar10}` to choose. See [docs/DATASETS.md](d
 
 | v3 | + Advanced heads (importance/grouped/hybrid) | **~90%** (+2.4%) | **~73%** (+3%) |
 
+| v4 | + Deep hierarchical networks + Residual connections | **~92%** (+2%) | **~84%** (+11%) ⭐ |
+
   * *Parameters (per filter):* `theta, freq, phase, sigma_x, sigma_y, gain`, plus a **sigmoid gate** `[0,1]`.
 
 ---
@@ -228,15 +230,51 @@ Choose via `--head-type-v3`:│   ├── run_comparison.sh   # Full compariso
 
 
 
-#### `cnn` (v2 baseline)## 3) Install
+#### `cnn` (v2 baseline)
 
 - Standard 3-layer CNN
 
-- ~93K params---
+- ~93K params
 
+---
 
+### 4. Deep Hierarchical Networks (v4) 🚀
 
----Python ≥ 3.10 recommended.
+**NEW**: Multi-layer architectures for significantly improved CIFAR-10 performance!
+
+Choose via `--model`:
+
+#### **`gabor_progressive`** (Recommended for CIFAR-10) ⭐
+- Gabor frontend (interpretable V1) + 2-3 CNN blocks
+- **2-blocks**: ~291K params → **~84% CIFAR-10** (+8% over v3)
+- **3-blocks**: ~1.2M params → **~86% CIFAR-10** (+10% over v3)
+- Best accuracy/efficiency trade-off
+- Add `--use-residual` for skip connections
+- Add `--num-conv-blocks 3` for deeper variant
+
+```bash
+# Recommended for CIFAR-10
+uv run train_universal.py \
+    --model gabor_progressive \
+    --dataset cifar10 \
+    --use-residual \
+    --num-conv-blocks 2 \
+    --epochs 50
+```
+
+#### `gabor_pyramid`
+- 3-layer hierarchical Gabor-style architecture (V1→V2→V4 inspired)
+- ~876K params → **~83% CIFAR-10**
+- More "biologically inspired" (multi-scale processing)
+- Add `--use-residual` for skip connections
+
+See **[docs/DEEP_GABOR_V4.md](docs/DEEP_GABOR_V4.md)** for full details and architecture diagrams.
+
+---
+
+---
+
+Python ≥ 3.10 recommended.
 
 
 
@@ -572,15 +610,23 @@ Trains Gabor, CNN, MLP on Fashion-MNIST + robustness eval---
 
 ## 📚 Documentation
 
-### Full Comparison (2-3 hours)## 6) Tips & troubleshooting
+### Architecture & Features
 
 - **[QUICKSTART_V3.md](docs/QUICKSTART_V3.md)** - Quick reference for testing v3 features
 
-- **[ADVANCED_HEADS_V3.md](docs/ADVANCED_HEADS_V3.md)** - Comprehensive head architecture documentation```bash
+- **[ADVANCED_HEADS_V3.md](docs/ADVANCED_HEADS_V3.md)** - Comprehensive head architecture documentation
+
+- **[DEEP_GABOR_V4.md](docs/DEEP_GABOR_V4.md)** - Deep hierarchical networks for improved CIFAR-10 performance ⭐
 
 - **[GABOR_ALGORITHM_DEEP_DIVE.md](docs/GABOR_ALGORITHM_DEEP_DIVE.md)** - Mathematical analysis of Gabor filters
 
-- **[IMPROVEMENTS_RESULTS.md](docs/IMPROVEMENTS_RESULTS.md)** - v2 improvement results and analysis./scripts/run_comparison.sh* **Accuracy collapses after a few epochs**
+- **[IMPROVEMENTS_RESULTS.md](docs/IMPROVEMENTS_RESULTS.md)** - v2 improvement results and analysis
+
+### Testing & Experimentation
+
+- **[TEST_SCRIPTS_REFERENCE.md](docs/TEST_SCRIPTS_REFERENCE.md)** - Quick reference for test scripts ⭐
+
+- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Comprehensive testing guide with filter scaling experiments
 
 
 

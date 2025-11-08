@@ -23,11 +23,18 @@ def parse_args():
     
     # model
     p.add_argument("--model", type=str, default="gabor",
-                   choices=["gabor", "gabor2", "gabor3", "cnn_tiny", "cnn_fair", "mlp_small", "mlp_medium", "mlp_large"])
+                   choices=["gabor", "gabor2", "gabor3", "gabor_pyramid", "gabor_progressive", 
+                           "cnn_tiny", "cnn_fair", "mlp_small", "mlp_medium", "mlp_large"])
     p.add_argument("--gabor-filters", type=int, default=32)
     p.add_argument("--kernel-size", type=int, default=31)
     p.add_argument("--spatial-attention", action="store_true")
     p.add_argument("--head-norm", type=str, default="group", choices=["group", "batch"])
+    
+    # Deep Gabor architectures (v4)
+    p.add_argument("--use-residual", action="store_true",
+                   help="Use residual connections in deep Gabor networks (v4)")
+    p.add_argument("--num-conv-blocks", type=int, default=2,
+                   help="Number of conv blocks in progressive architecture (2 or 3)")
     p.add_argument("--head-type", type=str, default="cnn", choices=["cnn", "mlp"],
                    help="Head type for Gabor v1/v2: 'cnn' (~93K params) or 'mlp' (~5K params)")
     p.add_argument("--head-type-v3", type=str, default="hybrid", 
@@ -188,6 +195,37 @@ def create_model(model_name: str, in_channels: int, num_classes: int, args):
             spatial_attention=args.spatial_attention,
             head_norm=args.head_norm,
             head_type=args.head_type_v3,
+            learnable_freq_range=args.learnable_freq_range,
+            grouped_freq_bands=args.grouped_freq_bands,
+            num_freq_groups=args.num_freq_groups,
+        )
+    
+    elif model_name == "gabor_pyramid":
+        from models import GaborDeepNetV4
+        model = GaborDeepNetV4(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            architecture="pyramid",
+            gabor_filters=args.gabor_filters,
+            kernel_size=args.kernel_size,
+            use_residual=args.use_residual,
+            norm_type=args.head_norm,
+            learnable_freq_range=args.learnable_freq_range,
+            grouped_freq_bands=args.grouped_freq_bands,
+            num_freq_groups=args.num_freq_groups,
+        )
+    
+    elif model_name == "gabor_progressive":
+        from models import GaborDeepNetV4
+        model = GaborDeepNetV4(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            architecture="progressive",
+            gabor_filters=args.gabor_filters,
+            kernel_size=args.kernel_size,
+            use_residual=args.use_residual,
+            num_blocks=args.num_conv_blocks,
+            norm_type=args.head_norm,
             learnable_freq_range=args.learnable_freq_range,
             grouped_freq_bands=args.grouped_freq_bands,
             num_freq_groups=args.num_freq_groups,

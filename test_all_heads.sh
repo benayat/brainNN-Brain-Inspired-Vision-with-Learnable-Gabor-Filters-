@@ -1,127 +1,148 @@
 #!/bin/bash
-# Comprehensive comparison of all v3 head architectures
+# Comprehensive comparison of all head architectures (v2, v3, v4)
 # Run this to test all variants and compare results
+#
+# Usage:
+#   ./test_all_heads.sh [dataset] [epochs] [test_v4_only]
+#
+# Examples:
+#   ./test_all_heads.sh fashion 20          # Test all architectures on Fashion-MNIST
+#   ./test_all_heads.sh cifar10 50          # Test all on CIFAR-10
+#   ./test_all_heads.sh cifar10 50 v4       # Test only v4 architectures
+#   ./test_all_heads.sh cifar10 50 filters  # Test different filter counts
 
 set -e
 
-DATASET=${1:-fashion}  # Default to Fashion-MNIST (faster than CIFAR-10)
-EPOCHS=${2:-20}        # Default 20 epochs
+DATASET=${1:-fashion}     # Default to Fashion-MNIST (faster than CIFAR-10)
+EPOCHS=${2:-20}           # Default 20 epochs
+TEST_MODE=${3:-all}       # all | v4 | filters
 
 # Set image size based on dataset
 case $DATASET in
     mnist|fashion|fashion_mnist)
         IMAGE_SIZE=64  # Upscale from 28×28 to 64×64
+        NATIVE_SIZE=28
         ;;
     cifar10|svhn)
         IMAGE_SIZE=32  # Native 32×32
+        NATIVE_SIZE=32
         ;;
     *)
         IMAGE_SIZE=64  # Default
+        NATIVE_SIZE=32
         ;;
 esac
 
-echo "======================================"
-echo "Testing Advanced Heads on $DATASET"
-echo "Epochs: $EPOCHS"
+# Calculate filter counts for testing
+FILTERS_PER_PIXEL=$((IMAGE_SIZE * IMAGE_SIZE))  # 1 filter per pixel
+FILTERS_STANDARD=32                              # Standard count
+FILTERS_HEAVY=64                                 # Heavy variant
+
+echo "=============================================="
+echo "Comprehensive Architecture Testing"
+echo "=============================================="
+echo "Dataset:    $DATASET"
+echo "Epochs:     $EPOCHS"
 echo "Image size: $IMAGE_SIZE"
-echo "======================================"
+echo "Test mode:  $TEST_MODE"
+echo "=============================================="
 echo ""
 
-# Baseline: GaborV2 with improvements
-echo "[1/6] Running GaborV2 (CNN head, baseline)..."
-uv run train_universal.py \
-    --model gabor2 \
-    --head-type cnn \
-    --dataset $DATASET \
-    --image-size $IMAGE_SIZE \
-    --epochs $EPOCHS \
-    --learnable-freq-range \
-    --grouped-freq-bands \
-    --save-checkpoint \
-    --outdir runs/${DATASET}_v2_cnn \
-    | tee runs/${DATASET}_v2_cnn.log
+# Array to track all tested variants for summary
+declare -a TESTED_VARIANTS=()
+
+# Helper function to run a test
+run_test() {
+    local name=$1
+    local model=$2
+    shift 2
+    local args=("$@")
+    
+    echo "[$name] Starting..."
+    uv run train_universal.py \
+        --model "$model" \
+        --dataset "$DATASET" \
+        --image-size "$IMAGE_SIZE" \
+        --epochs "$EPOCHS" \
+        --learnable-freq-range \
+        --grouped-freq-bands \
+        --save-checkpoint \
+        --outdir "runs/${DATASET}_${name}" \
+        "${args[@]}" \
+        | tee "runs/${DATASET}_${name}.log"
+    
+    TESTED_VARIANTS+=("$name")
+    echo ""
+}
+
+# ==============================================
+# V2/V3 TESTS (if not v4-only mode)
+# ==============================================
+if [ "$TEST_MODE" != "v4" ] && [ "$TEST_MODE" != "filters" ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Testing V2/V3 Architectures (6 tests)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    run_test "v2_cnn" "gabor2" --head-type cnn
+    run_test "v3_importance" "gabor3" --head-type-v3 importance
+    run_test "v3_grouped" "gabor3" --head-type-v3 grouped
+    run_test "v3_per_filter" "gabor3" --head-type-v3 per_filter_mlp
+    run_test "v3_hybrid" "gabor3" --head-type-v3 hybrid
+    run_test "v3_cnn" "gabor3" --head-type-v3 cnn
+fi
+
+# ==============================================
+# V4 DEEP ARCHITECTURE TESTS
+# ==============================================
+if [ "$TEST_MODE" = "all" ] || [ "$TEST_MODE" = "v4" ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Testing V4 Deep Architectures (5 tests)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    run_test "v4_pyramid" "gabor_pyramid"
+    run_test "v4_pyramid_res" "gabor_pyramid" --use-residual
+    run_test "v4_prog_2b" "gabor_progressive" --num-conv-blocks 2
+    run_test "v4_prog_2b_res" "gabor_progressive" --num-conv-blocks 2 --use-residual
+    run_test "v4_prog_3b_res" "gabor_progressive" --num-conv-blocks 3 --use-residual
+fi
+
+# ==============================================
+# FILTER COUNT SCALING TESTS
+# ==============================================
+if [ "$TEST_MODE" = "filters" ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Testing Different Gabor Filter Counts"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Standard: $FILTERS_STANDARD filters"
+    echo "Heavy:    $FILTERS_HEAVY filters"
+    echo "PerPixel: $FILTERS_PER_PIXEL filters (1 per pixel)"
+    echo ""
+
+    # V3 Hybrid with different filter counts
+    run_test "v3_hybrid_f32" "gabor3" --head-type-v3 hybrid --gabor-filters 32
+    run_test "v3_hybrid_f64" "gabor3" --head-type-v3 hybrid --gabor-filters 64
+    run_test "v3_hybrid_f${FILTERS_PER_PIXEL}" "gabor3" --head-type-v3 hybrid --gabor-filters "$FILTERS_PER_PIXEL"
+
+    # V4 Progressive with different filter counts
+    run_test "v4_prog_f32" "gabor_progressive" --use-residual --gabor-filters 32
+    run_test "v4_prog_f64" "gabor_progressive" --use-residual --gabor-filters 64
+    run_test "v4_prog_f${FILTERS_PER_PIXEL}" "gabor_progressive" --use-residual --gabor-filters "$FILTERS_PER_PIXEL"
+fi
 
 echo ""
-echo "[2/6] Running GaborV3 (Importance head)..."
-uv run train_universal.py \
-    --model gabor3 \
-    --head-type-v3 importance \
-    --dataset $DATASET \
-    --image-size $IMAGE_SIZE \
-    --epochs $EPOCHS \
-    --learnable-freq-range \
-    --grouped-freq-bands \
-    --save-checkpoint \
-    --outdir runs/${DATASET}_v3_importance \
-    | tee runs/${DATASET}_v3_importance.log
-
+echo "=============================================="
+echo "✓ All experiments complete!"
+echo "=============================================="
 echo ""
-echo "[3/6] Running GaborV3 (Grouped head)..."
-uv run train_universal.py \
-    --model gabor3 \
-    --head-type-v3 grouped \
-    --dataset $DATASET \
-    --image-size $IMAGE_SIZE \
-    --epochs $EPOCHS \
-    --learnable-freq-range \
-    --grouped-freq-bands \
-    --save-checkpoint \
-    --outdir runs/${DATASET}_v3_grouped \
-    | tee runs/${DATASET}_v3_grouped.log
+echo "Summary - Architecture Comparison"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+printf "%-25s | %-10s | %-12s | %-12s | %s\n" "Architecture" "Final Eval" "Best Eval" "Best@Epoch" "Params"
+printf "%-25s-+-%-10s-+-%-12s-+-%-12s-+-%s\n" "-------------------------" "----------" "------------" "------------" "----------"
 
-echo ""
-echo "[4/6] Running GaborV3 (PerFilterMLP head)..."
-uv run train_universal.py \
-    --model gabor3 \
-    --head-type-v3 per_filter_mlp \
-    --dataset $DATASET \
-    --image-size $IMAGE_SIZE \
-    --epochs $EPOCHS \
-    --learnable-freq-range \
-    --grouped-freq-bands \
-    --save-checkpoint \
-    --outdir runs/${DATASET}_v3_per_filter \
-    | tee runs/${DATASET}_v3_per_filter.log
-
-echo ""
-echo "[5/6] Running GaborV3 (Hybrid head - RECOMMENDED)..."
-uv run train_universal.py \
-    --model gabor3 \
-    --head-type-v3 hybrid \
-    --dataset $DATASET \
-    --image-size $IMAGE_SIZE \
-    --epochs $EPOCHS \
-    --learnable-freq-range \
-    --grouped-freq-bands \
-    --save-checkpoint \
-    --outdir runs/${DATASET}_v3_hybrid \
-    | tee runs/${DATASET}_v3_hybrid.log
-
-echo ""
-echo "[6/6] Running GaborV3 (Standard CNN head for comparison)..."
-uv run train_universal.py \
-    --model gabor3 \
-    --head-type-v3 cnn \
-    --dataset $DATASET \
-    --image-size $IMAGE_SIZE \
-    --epochs $EPOCHS \
-    --learnable-freq-range \
-    --grouped-freq-bands \
-    --save-checkpoint \
-    --outdir runs/${DATASET}_v3_cnn \
-    | tee runs/${DATASET}_v3_cnn.log
-
-echo ""
-echo "======================================"
-echo "All experiments complete!"
-echo "======================================"
-echo ""
-echo "Summary - Final Results (Eval Accuracy):"
-echo "---------------------------------------------"
-printf "%-20s | %-10s | %-12s | %-15s | %s\n" "Model" "Final Eval" "Best Eval" "Best@Epoch" "Params"
-printf "%-20s-+-%-10s-+-%-12s-+-%-15s-+-%s\n" "--------------------" "----------" "------------" "---------------" "----------"
-
-for variant in v2_cnn v3_importance v3_grouped v3_per_filter v3_hybrid v3_cnn; do
+# Process all tested variants
+for variant in "${TESTED_VARIANTS[@]}"; do
     logfile="runs/${DATASET}_${variant}.log"
     if [ -f "$logfile" ]; then
         # Extract final eval accuracy (last line)
@@ -165,12 +186,22 @@ for variant in v2_cnn v3_importance v3_grouped v3_per_filter v3_hybrid v3_cnn; d
             best_pct="N/A"
         fi
         
-        printf "%-20s | %-10s | %-12s | %-15s | %s\n" "$variant" "$final_pct" "$best_pct" "$best_epoch" "$params"
+        printf "%-25s | %-10s | %-12s | %-12s | %s\n" "$variant" "$final_pct" "$best_pct" "$best_epoch" "$params"
     fi
 done
 
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "Note: 'Final Eval' = last epoch performance, 'Best Eval' = peak performance during training"
+echo "📊 Notes:"
+echo "  • Final Eval: Performance at last epoch"
+echo "  • Best Eval:  Peak performance during training"
+echo "  • Best@Epoch: Epoch number where peak occurred"
 echo ""
-echo "Detailed logs saved to: runs/${DATASET}_*.log"
-echo "Model checkpoints saved to: runs/${DATASET}_*/final_model.pth"
+echo "📁 Files:"
+echo "  • Logs:        runs/${DATASET}_*.log"
+echo "  • Checkpoints: runs/${DATASET}_*/final_model.pth"
+echo ""
+echo "💡 Tips:"
+echo "  • Test v4 only:           ./test_all_heads.sh $DATASET $EPOCHS v4"
+echo "  • Test filter scaling:    ./test_all_heads.sh $DATASET $EPOCHS filters"
+echo "  • See DEEP_GABOR_V4.md for architecture details"
